@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cricket Chase Analyzer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            padding: 0;
+        }
+        .container {
+            max-width: 1200px; /* Increased for larger screens */
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+            font-size: 2em;
+            margin: 0;
+        }
+        label {
+            display: block;
+            margin: 5px 0 2px;
+            font-weight: bold;
+            font-size: 1em;
+        }
+        input, select, button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+            font-size: 1em;
+            border-radius: 4px;
+        }
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            flex: 1;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #resetBtn {
+            background-color: #f44336;
+        }
+        #resetBtn:hover {
+            background-color: #d32f2f;
+        }
+        #downloadBtn {
+            background-color: #2196F3;
+        }
+        #downloadBtn:hover {
+            background-color: #1976D2;
+        }
+        #output {
+            white-space: pre-wrap;
+            font-family: monospace;
+            background: #f9f9f9;
+            padding: 15px;
+            border: 1px solid #ddd;
+            min-height: 300px; /* Larger output area */
+            overflow-x: auto;
+            font-size: 1.1em; /* Larger text */
+            line-height: 1.5;
+            flex-grow: 1; /* Expands to fill space */
+        }
+        @media (max-width: 600px) {
+            .container {
+                max-width: 100%;
+                padding: 10px;
+            }
+            h1 {
+                font-size: 1.5em;
+            }
+            input, select, button {
+                padding: 8px;
+                font-size: 0.9em;
+            }
+            #output {
+                font-size: 0.9em;
+                min-height: 200px;
+            }
+            .button-group {
+                flex-direction: column;
+                gap: 5px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Cricket Chase Analyzer</h1>
+        <label for="fileInput">Upload Excel File:</label>
+        <input type="file" id="fileInput" accept=".xlsx, .xls">
+        
+        <label for="scoreInput">Score/Wickets (e.g., 20/1):</label>
+        <input type="text" id="scoreInput" placeholder="Enter score/wickets">
+        
+        <label for="overSelect">Select Over:</label>
+        <select id="overSelect">
+            <option value="">-- Select Over --</option>
+        </select>
+        
+        <label for="rangeSelect">20-Over Score Range (Optional):</label>
+        <select id="rangeSelect">
+            <option value="">-- All Ranges --</option>
+            <option value="120-129">120-129</option>
+            <option value="130-139">130-139</option>
+            <option value="140-149">140-149</option>
+            <option value="150-159">150-159</option>
+            <option value="160-169">160-169</option>
+            <option value="170-179">170-179</option>
+            <option value="180-189">180-189</option>
+            <option value="190-199">190-199</option>
+            <option value="200+">200+</option>
+        </select>
+        
+        <div class="button-group">
+            <button onclick="processInput()">Submit</button>
+            <button id="resetBtn" onclick="resetForm()">Reset</button>
+            <button id="downloadBtn" onclick="downloadResults()" disabled>Download Results</button>
+        </div>
+        
+        <div id="output">Upload your Excel file to start.</div>
+    </div>
+
+    <!-- SheetJS Library -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js" 
+            onerror="alert('Failed to load SheetJS. Check internet or use a local copy.');"></script>
+    <script>
+        let matches = [];
+        let filteredMatches = [];
+        let firstInningsDone = false;
+        let scoreRange = null;
+        let targetRuns = null;
+        let lastOutput = '';
+
+        // Populate over dropdown (1-40)
+        const overSelect = document.getElementById('overSelect');
+        for (let i = 1; i <= 40; i++) {
+            const option = document.createElement('option');
+            option.value = i;
+            option.text = `${i}th Over`;
+            overSelect.appendChild(option);
+        }
+
+        // File input change handler
+        document.getElementById('fileInput').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (!file) {
+                alert('No file selected.');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const data = new Uint8Array(e.target.result);
+                    const workbook = XLSX.read(data, { type: 'array' });
+                    const sheet = workbook.Sheets[workbook.SheetNames[0]];
+                    matches = XLSX.utils.sheet_to_json(sheet);
+                    filteredMatches = matches;
+                    document.getElementById('output').textContent = `File loaded successfully! ${matches.length} matches found.`;
+                    console.log("Loaded matches:", matches);
+                } catch (err) {
+                    alert('Error loading file: ' + err.message);
+                    document.getElementById('output').textContent = "Error loading file: " + err.message;
+                }
+            };
+            reader.onerror = function() {
+                alert('Failed to read file.');
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        // Parse score/wickets input
+        function parseScore(scoreWickets) {
+            const parts = scoreWickets.split('/');
+            if (parts.length !== 2) return [null, null];
+            const runs = parseInt(parts[0]);
+            const wickets = parseInt(parts[1]);
+            if (isNaN(runs) || isNaN(wickets) || wickets < 0 || wickets > 10) return [null, null];
+            return [runs, wickets];
+        }
+
+        // Parse 20-over score range
+        function parseRange(rangeStr) {
+            if (!rangeStr) return null;
+            if (rangeStr === "200+") return [200, Infinity];
+            const [min, max] = rangeStr.split('-').map(Number);
+            return [min, max];
+        }
+
+        // Pad string for alignment
+        function padString(str, length) {
+            return String(str).padEnd(length, ' ');
+        }
+
+        // Compare scores for sorting
+        function compareScores(scoreA, scoreB) {
+            if (!scoreA || !scoreB) return scoreA ? 1 : -1;
+            const [runsA, wicketsA] = scoreA.split('/').map(Number);
+            const [runsB, wicketsB] = scoreB.split('/').map(Number);
+            if (runsA !== runsB) return runsA - runsB;
+            return wicketsA - wicketsB;
+        }
+
+        // Calculate score difference
+        function calculateDifference(scoreLater, scoreEarlier) {
+            if (!scoreLater || !scoreEarlier) return "N/A";
+            const [runsLater, wicketsLater] = scoreLater.split('/').map(Number);
+            const [runsEarlier, wicketsEarlier] = scoreEarlier.split('/').map(Number);
+            const runDiff = runsLater - runsEarlier;
+            const wicketDiff = wicketsLater - wicketsEarlier;
+            return `${runDiff}/${wicketDiff}`;
+        }
+
+        // Process input and compare
+        function processInput() {
+            const scoreWickets = document.getElementById('scoreInput').value.trim();
+            const over = parseInt(document.getElementById('overSelect').value);
+            const rangeStr = document.getElementById('rangeSelect').value;
+            const [runs, wickets] = parseScore(scoreWickets);
+            const output = document.getElementById('output');
+
+            if (!scoreWickets || isNaN(over) || runs === null || wickets === null) {
+                output.textContent = "Please enter valid score/wickets (e.g., '20/1') and select an over.";
+                return;
+            }
+            if (matches.length === 0) {
+                output.textContent = "Please upload an Excel file first.";
+                return;
+            }
+
+            let compareData = matches;
+            const selectedRange = parseRange(rangeStr);
+
+            if (over <= 20) {
+                if (over === 20) {
+                    firstInningsDone = true;
+                    targetRuns = runs;
+                    scoreRange = selectedRange || getScoreRange(runs);
+                }
+            } else {
+                if (!firstInningsDone) {
+                    const targetInput = prompt("Please enter the final score after 20 overs (e.g., '142/3'):");
+                    if (!targetInput) {
+                        output.textContent = "Target score required for 2nd innings analysis.";
+                        return;
+                    }
+                    const [targetRunsInput, targetWickets] = parseScore(targetInput);
+                    if (targetRunsInput === null || targetWickets === null) {
+                        output.textContent = "Invalid target score format. Use 'runs/wickets' (e.g., '142/3').";
+                        return;
+                    }
+                    firstInningsDone = true;
+                    targetRuns = targetRunsInput;
+                    scoreRange = selectedRange || getScoreRange(targetRuns);
+                }
+                compareData = filteredMatches;
+            }
+
+            if (selectedRange) {
+                compareData = compareData.filter(match => {
+                    const score = match['20over'];
+                    if (!score) return false;
+                    const [matchRuns] = score.split('/').map(Number);
+                    return matchRuns >= selectedRange[0] && (selectedRange[1] === Infinity ? true : matchRuns <= selectedRange[1]);
+                });
+                scoreRange = selectedRange;
+            } else if (over > 20 && scoreRange) {
+                compareData = compareData.filter(match => {
+                    const score = match['20over'];
+                    if (!score) return false;
+                    const [matchRuns] = score.split('/').map(Number);
+                    return matchRuns >= scoreRange[0] && (selectedRange[1] === Infinity ? true : matchRuns <= scoreRange[1]);
+                });
+            }
+
+            const overKey = `${over}over`;
+            const yearMatches = {};
+            let totalMatches = 0;
+            let runDifference = null;
+
+            if (over <= 20) {
+                compareData.forEach((match, index) => {
+                    const score = match[overKey];
+                    if (!score) return;
+                    const [histRuns, histWickets] = score.split('/').map(Number);
+                    if (histRuns === runs && histWickets === wickets) {
+                        const year = match['year'];
+                        if (!yearMatches[year]) yearMatches[year] = [];
+                        yearMatches[year].push({ match, index });
+                        totalMatches++;
+                    }
+                });
+            } else {
+                runDifference = targetRuns - runs;
+                compareData.forEach((match, index) => {
+                    const twentyOverScore = match['20over'];
+                    const currentOverScore = match[overKey];
+                    if (twentyOverScore && currentOverScore) {
+                        const [twentyRuns] = twentyOverScore.split('/').map(Number);
+                        const [currentRuns] = currentOverScore.split('/').map(Number);
+                        if (twentyRuns - currentRuns === runDifference) {
+                            const year = match['year'];
+                            if (!yearMatches[year]) yearMatches[year] = [];
+                            yearMatches[year].push({ match, index });
+                            totalMatches++;
+                        }
+                    }
+                });
+            }
+
+            let resultText = `Analysis for ${runs}/${wickets} after Over ${over}:\n`;
+            if (over > 20 || selectedRange) {
+                resultText += `20-Over Score Range: ${rangeStr || `${scoreRange[0]}-${scoreRange[1] === Infinity ? '200+' : scoreRange[1]}`}\n`;
+            }
+            if (over > 20 && runDifference !== null) {
+                resultText += `Run Difference (20ov - ${over}ov): ${runDifference}\n`;
+            }
+            resultText += `Total matches${over <= 20 ? ` with exactly ${runs}/${wickets}` : ` with run difference ${runDifference}`}: ${totalMatches}\n\n`;
+
+            if (totalMatches === 0) {
+                resultText += `No matches found${over <= 20 ? ` with exactly ${runs}/${wickets}` : ` with run difference ${runDifference}`} after Over ${over}${selectedRange ? ` within ${rangeStr}` : ''}.`;
+            } else {
+                if (over <= 20) {
+                    resultText += "Year-wise Match Details:\n";
+                    resultText += padString("Year", 6) + padString("Match", 8) +
+                        (over < 6 ? padString("6ov", 8) : "") +
+                        (over < 10 ? padString("10ov", 8) : "") +
+                        (over < 15 ? padString("15ov", 8) : "") +
+                        padString("20ov", 8) + padString("Result", 8) + "\n";
+                    resultText += "-".repeat(60) + "\n";
+
+                    const sortedRows = [];
+                    Object.keys(yearMatches).sort().forEach(year => {
+                        yearMatches[year].forEach(({ match, index }) => {
+                            sortedRows.push({ year, match, index });
+                        });
+                    });
+
+                    sortedRows.sort((a, b) => {
+                        if (a.year !== b.year) return a.year - b.year;
+                        if (a.index !== b.index) return a.index - b.index;
+                        if (over < 6 && a.match['6over'] !== b.match['6over']) return compareScores(a.match['6over'], b.match['6over']);
+                        if (over < 10 && a.match['10over'] !== b.match['10over']) return compareScores(a.match['10over'], b.match['10over']);
+                        if (over < 15 && a.match['15over'] !== b.match['15over']) return compareScores(a.match['15over'], b.match['15over']);
+                        if (a.match['20over'] !== b.match['20over']) return compareScores(a.match['20over'], b.match['20over']);
+                        return (a.match['result'] || 'unknown').localeCompare(b.match['result'] || 'unknown');
+                    });
+
+                    sortedRows.forEach(({ year, match, index }) => {
+                        const row = padString(year, 6) + padString(`#${index + 1}`, 8) +
+                            (over < 6 ? padString(match['6over'] || "N/A", 8) : "") +
+                            (over < 10 ? padString(match['10over'] || "N/A", 8) : "") +
+                            (over < 15 ? padString(match['15over'] || "N/A", 8) : "") +
+                            padString(match['20over'] || "N/A", 8) +
+                            padString(match['result'] || "unknown", 8) + "\n";
+                        resultText += row;
+                    });
+                } else {
+                    resultText += "Year-wise Match Details:\n";
+                    resultText += padString("Year", 6) + padString("Match", 8) +
+                        (over < 26 ? padString("26ov", 8) : "") +
+                        (over < 30 ? padString("30ov", 8) : "") +
+                        (over < 35 ? padString("35ov", 8) : "") +
+                        padString(`${over}ov`, 8) +
+                        padString("20ov", 8) +
+                        padString("40ov", 8) +
+                        padString("15ov-6ov", 10) + // New column
+                        padString("20ov-6ov", 10) + // New column
+                        padString("Result", 8) + "\n";
+                    resultText += "-".repeat(94) + "\n"; // Adjusted for new columns
+
+                    const sortedRows = [];
+                    Object.keys(yearMatches).sort().forEach(year => {
+                        yearMatches[year].forEach(({ match, index }) => {
+                            sortedRows.push({ year, match, index });
+                        });
+                    });
+
+                    sortedRows.sort((a, b) => {
+                        if (a.year !== b.year) return a.year - b.year;
+                        if (a.index !== b.index) return a.index - b.index;
+                        if (over < 26 && a.match['26over'] !== b.match['26over']) return compareScores(a.match['26over'], b.match['26over']);
+                        if (over < 30 && a.match['30over'] !== b.match['30over']) return compareScores(a.match['30over'], b.match['30over']);
+                        if (over < 35 && a.match['35over'] !== b.match['35over']) return compareScores(a.match['35over'], b.match['35over']);
+                        const overKey = `${over}over`;
+                        if (a.match[overKey] !== b.match[overKey]) return compareScores(a.match[overKey], b.match[overKey]);
+                        if (a.match['20over'] !== b.match['20over']) return compareScores(a.match['20over'], b.match['20over']);
+                        if (a.match['40over'] !== b.match['40over']) return compareScores(a.match['40over'], b.match['40over']);
+                        return (a.match['result'] || 'unknown').localeCompare(b.match['result'] || 'unknown');
+                    });
+
+                    sortedRows.forEach(({ year, match, index }) => {
+                        const diff15ov6ov = calculateDifference(match['15over'], match['6over']);
+                        const diff20ov6ov = calculateDifference(match['20over'], match['6over']);
+                        const row = padString(year, 6) + padString(`#${index + 1}`, 8) +
+                            (over < 26 ? padString(match['26over'] || "N/A", 8) : "") +
+                            (over < 30 ? padString(match['30over'] || "N/A", 8) : "") +
+                            (over < 35 ? padString(match['35over'] || "N/A", 8) : "") +
+                            padString(match[overKey] || "N/A", 8) +
+                            padString(match['20over'] || "N/A", 8) +
+                            padString(match['40over'] || "N/A", 8) +
+                            padString(diff15ov6ov, 10) + // New column
+                            padString(diff20ov6ov, 10) + // New column
+                            padString(match['result'] || "unknown", 8) + "\n";
+                        resultText += row;
+                    });
+                }
+            }
+
+            output.textContent = resultText;
+            lastOutput = resultText;
+            document.getElementById('downloadBtn').disabled = false;
+        }
+
+        // Reset form and state
+        function resetForm() {
+            matches = [];
+            filteredMatches = [];
+            firstInningsDone = false;
+            scoreRange = null;
+            targetRuns = null;
+            lastOutput = '';
+            document.getElementById('fileInput').value = '';
+            document.getElementById('scoreInput').value = '';
+            document.getElementById('overSelect').value = '';
+            document.getElementById('rangeSelect').value = '';
+            document.getElementById('output').textContent = "Upload your Excel file to start.";
+            document.getElementById('downloadBtn').disabled = true;
+        }
+
+        // Download results as text file
+        function downloadResults() {
+            if (!lastOutput) return;
+            const blob = new Blob([lastOutput], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Cricket_Analysis_${new Date().toISOString().slice(0,10)}.txt`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Default score range function
+        function getScoreRange(runs) {
+            if (runs >= 200) return [200, Infinity];
+            const rangeStart = Math.floor(runs / 10) * 10;
+            return [rangeStart, rangeStart + 9];
+        }
+    </script>
+</body>
+</html>
